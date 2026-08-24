@@ -1,0 +1,786 @@
+---
+title: "Pre-Dreams"
+author: "Quentin Miagoux"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    df_print: paged
+    theme: united
+    highlight: tango
+    keep_md: yes
+    number_sections: yes
+    smart: no
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE, 
+	fig.height=10,
+  fig.width = 8
+)
+
+dir.create("figures", showWarnings = FALSE)
+```
+
+
+
+
+```{r setup-and-data}
+# Packages used by the analyses and figures below.
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(purrr)
+library(stringr)
+library(ggplot2)
+library(ggrepel)
+library(decoupleR)
+library(ggvenn)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(enrichplot)
+library(ComplexHeatmap)
+library(circlize)
+library(grid)
+library(svglite)
+library(tidytext)
+
+# Local helper functions used in this report.
+source("function.R")
+
+# Harmonize the four differential-expression result tables to a shared schema.
+DMD <- readRDS(file = "data/DMD_paper.RDS")
+DMD$dataset  <- DMD$dataset %>% 
+  dplyr::rename(padj = adj.P.Val, log2FoldChange = logFC, Symbol = Gene.symbol)  %>% 
+  arrange(padj) %>% 
+  distinct(entrezgene_id, .keep_all = T) %>% 
+  mutate(group = if_else(log2FoldChange < 0,"downregulated","upregulated"), disease = "DMD")  %>% 
+  filter(!is.na(entrezgene_id))
+
+EDMD <- readRDS(file = "data/EDMD_paper.RDS")
+EDMD$dataset  <- EDMD$dataset %>% 
+  arrange(padj) %>% 
+  distinct(entrezgene_id, .keep_all = T) %>% 
+  mutate(group = if_else(log2FoldChange < 0,"downregulated","upregulated"), disease = "EDMD") %>% 
+  filter(!is.na(entrezgene_id)) 
+
+DNM2 <- readRDS(file = "data/DNM2_paper.RDS")
+DNM2$dataset  <- DNM2$dataset %>%
+  arrange(padj) %>% 
+  distinct(entrezgene_id, .keep_all = T)  %>% 
+  dplyr::select(-entrezgene_id) %>% dplyr::rename(Symbol = Human_symbol, entrezgene_id = ENTREZID)  %>%
+  mutate(group = if_else(log2FoldChange < 0,"downregulated","upregulated"), disease = "DNM2")  %>% 
+  filter(!is.na(entrezgene_id))
+
+POMPE <- readRDS(file = "data/Pompe_paper.RDS")
+POMPE$dataset  <- POMPE$dataset %>% 
+  dplyr::rename(padj = adj.P.Val, log2FoldChange = logFC, Symbol = hgnc_symbol) %>% 
+  arrange(padj) %>% 
+  distinct(entrezgene_id, .keep_all = T)  %>% 
+  mutate(group = if_else(log2FoldChange < 0,"downregulated","upregulated"), disease = "POMPE") %>% 
+  filter(!is.na(entrezgene_id))
+
+datasets <- list(
+  DMD = DMD,
+  EDMD = EDMD,
+  DNM2 = DNM2,
+  POMPE = POMPE
+)
+
+# Ranked vectors are used for pathway visualisation at the end of the report.
+combined_de_results <- datasets %>%
+  map(~ .$dataset) %>% 
+  map(~ ungroup(.)) %>% 
+  map(~ dplyr::select(.,log2FoldChange, disease,entrezgene_id, padj)) %>%
+  map(~ dplyr::mutate(.,entrezgene_id = as.character(entrezgene_id))) %>% 
+  list_rbind() %>% mutate(entrezgene_id = as.character(entrezgene_id))
+
+entrez_ids <- list(
+  DMD = filter(combined_de_results, disease == "DMD") %>% pull(entrezgene_id),
+  EDMD = filter(combined_de_results, disease == "EDMD") %>% pull(entrezgene_id),
+  DNM2 = filter(combined_de_results, disease == "DNM2") %>% pull(entrezgene_id),
+  POMPE = filter(combined_de_results, disease == "POMPE") %>% pull(entrezgene_id)
+)
+
+log2_fold_changes <- list(
+  DMD = filter(combined_de_results, disease == "DMD") %>% pull(log2FoldChange),
+  EDMD = filter(combined_de_results, disease == "EDMD") %>% pull(log2FoldChange),
+  DNM2 = filter(combined_de_results, disease == "DNM2") %>% pull(log2FoldChange),
+  POMPE = filter(combined_de_results, disease == "POMPE") %>% pull(log2FoldChange)
+)
+
+ranked_log2_fold_changes <- map2(log2_fold_changes, entrez_ids, setNames) %>%
+  map(~ sort(.x, decreasing = TRUE))
+```
+
+
+# Differentially expressed genes {.tabset .tabset-fade}
+
+```{r degs-per-disease}
+degs <- extract_degs_no(list = datasets, 1.5)
+
+deg_data <- data.frame(
+  Disease = rep(c("DMD", "DNM2", "EDMD", "POMPE"), each = 2),
+  Direction = rep(c("Up", "Down"), times = 4),
+  DEGs = unlist(
+    degs %>%
+      map(~ c(
+        Up   = sum(grepl("_upregulated$", .x)),
+        Down = sum(grepl("_downregulated$", .x))
+      )),
+    use.names = FALSE
+  )
+)
+
+# 🔧 Format factors
+deg_data$Disease <- factor(deg_data$Disease, levels = c("DMD", "EDMD", "DNM2", "POMPE"))
+deg_data$Direction <- factor(deg_data$Direction, levels = c("Up", "Down"))
+
+# 🎨 Custom colors
+color_map <- c("Up" = "#af8dc3", "Down" = "#7fbf7b")
+
+# 📈 Plot
+barplot_degs <- ggplot(deg_data, aes(x = Disease, y = DEGs, fill = Direction)) +
+    geom_bar(stat = "identity", position = "stack", width = 0.6) +
+    geom_text(aes(label = DEGs), position = position_stack(vjust = 0.5), color = "white", size = 4.2, fontface = "bold") +
+    scale_fill_manual(values = color_map) +
+    labs(
+        title = "",
+        x = NULL,
+        y = "Number of DEGs",
+        fill = "Expression change"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+        plot.title = element_text(face = "bold", hjust = 0.5),
+        axis.text.x = element_text(face = "bold"),
+        legend.position = "top"
+    )
+
+ggsave(
+  filename = "figures/barplot_DEGs.svg",
+  plot = barplot_degs,
+  width = 5,
+  height = 5,
+  device = "svg"
+)
+```
+
+# Venn overlap
+```{r venn-overlap}
+degs <- extract_degs_no(list = datasets, 1.5)
+
+venn <- ggvenn(degs,  fill_alpha = .5, text_size = 5, set_name_color=c('#8da0cb','#fc8d62',"#66c2a5","#e78ac3"), fill_color=c('#8da0cb', '#fc8d62',"#66c2a5","#e78ac3"))
+venn
+
+degs_005_lfc15_3 <-  names(which(table(unlist(degs)) >= 3)) %>% str_split("_", simplify = T) %>% .[,1]
+
+degs_005_lfc15_4 <-  names(which(table(unlist(degs)) >= 4)) %>% str_split("_", simplify = T) %>% .[,1]
+
+```
+
+
+# DEG heatmap
+```{r deg-heatmap}
+threshold <- 4 
+genes <- unlist(degs)
+
+common_genes <- names(which(table(unlist(lapply(degs, unique))) >= threshold)) %>%
+  str_split("_", simplify = TRUE) %>%
+  .[,1] %>%
+  unique()
+
+heatmap_df <- imap(datasets, ~{
+  .x$dataset %>%
+    dplyr::ungroup() %>%
+    dplyr::select(Symbol, value = log2FoldChange) %>%
+    dplyr::filter(Symbol %in% common_genes) %>%
+    dplyr::distinct(Symbol, .keep_all = TRUE) %>%
+    dplyr::rename(!!.y := value)
+}) %>%
+  purrr::reduce(full_join, by = "Symbol")
+
+mat <- heatmap_df %>%
+  column_to_rownames("Symbol") %>%
+  as.matrix()
+
+# optional: fixed order
+mat <- mat[, c("DMD", "EDMD", "DNM2", "POMPE"), drop = FALSE]
+
+# replace NA if needed
+mat[is.na(mat)] <- 0
+
+# cap extreme values to avoid a few genes dominating the palette
+cap <- 4
+mat_plot <- mat
+mat_plot[mat_plot > cap] <- cap
+mat_plot[mat_plot < -cap] <- -cap
+
+col_fun <- colorRamp2(
+  c(-cap, 0, cap),
+  c("blue", "white", "red")
+)
+
+ht <- Heatmap(
+    mat_plot,
+    name = "log2FC",
+    col = col_fun,
+    cluster_rows = TRUE,
+    cluster_columns = FALSE,
+    show_row_names = TRUE,
+    show_column_names = TRUE,
+    column_names_rot = 30,
+    column_names_gp = grid::gpar(fontsize = 12, fontface = "bold"),
+    row_names_gp = grid::gpar(fontsize = 9, fontface = "bold"),
+  use_raster = FALSE
+)
+ht
+```
+
+
+# GSEA
+```{r gsea}
+analyse_KEGG <- readRDS("data/Analyse_KEGG_GSEA.RDS")  %>% 
+  clusterProfiler::setReadable(OrgDb = "org.Hs.eg.db", keyType = "ENTREZID")
+
+
+# keywords defining KEGG "Human Diseases"
+disease_terms <- c(
+  "Influenza", 
+  "Pertussis", 
+  "Rheumatoid", 
+  "Myocarditis",
+  "infection",
+  "disease"
+)
+
+pathways <- analyse_KEGG %>% 
+  as.data.frame() %>%
+  filter(p.adjust < 0.05) %>%
+  # ---- REMOVE DISEASE-LABELED KEGG TERMS ----
+  filter(!stringr::str_detect(
+    Description,
+    stringr::regex(paste(disease_terms, collapse="|"), ignore_case = TRUE)
+  )) %>%
+  group_by(Description) %>% 
+  summarise(
+    n   = n(),
+    NES = mean(NES),
+    .groups = "drop"
+  ) %>% 
+  filter(n > 2)
+
+pathways_up <- pathways %>% arrange(desc(n), desc(NES)) %>% head(15)
+pathways_down <- pathways %>% arrange(desc(n), NES) %>% head(2)
+
+analyse_KEGG_f <- analyse_KEGG %>%
+  as.data.frame() %>%
+  filter(Description %in% c(pathways_up$Description, pathways_down$Description)) %>%
+  arrange(desc(NES))
+
+analyse_KEGG_f <- as.data.frame(analyse_KEGG_f) %>%
+  mutate(GeneRatio = setSize / max(setSize, na.rm = TRUE))
+
+alpha <- 0.05
+
+# 1) Keep only significant results (you can relax this if you want to show "presence/absence")
+df0 <- analyse_KEGG_f %>%
+  filter(!is.na(NES), !is.na(p.adjust)) %>%
+  filter(p.adjust < alpha)
+
+# 2) Remove mixed-direction pathways:
+#    if a pathway has BOTH positive and negative NES across diseases -> drop it
+keep_terms <- df0 %>%
+  group_by(Description) %>%
+  summarise(
+    has_pos = any(NES > 0, na.rm = TRUE),
+    has_neg = any(NES < 0, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(!(has_pos & has_neg)) %>%          # <-- this enforces one direction only
+  pull(Description)
+
+df1 <- df0 %>% filter(Description %in% keep_terms)
+
+# 3) Order pathways: a) thematic buckets, b) within-bucket by mean NES magnitude
+bucketed <- df1 %>%
+  group_by(Description) %>%
+  summarise(
+    NES_mean = mean(NES, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    bucket = case_when(
+      str_detect(Description, regex("Lysosome|Phagosome|Antigen|Endocyt|Autophag|Proteasome", ignore_case=TRUE)) ~ "Endolysosomal / trafficking",
+      str_detect(Description, regex("Cytokine|Complement|Hematopoietic|IgA|Staphylococcus|Viral|Influenza|Pertussis|Myocarditis", ignore_case=TRUE)) ~ "Immune / inflammation",
+      str_detect(Description, regex("ECM|Adhesion|Focal adhesion|Cell adhesion", ignore_case=TRUE)) ~ "ECM / adhesion",
+      str_detect(Description, regex("PI3K|p53|MAPK|TGF|WNT|Notch", ignore_case=TRUE)) ~ "Signaling / stress",
+      str_detect(Description, regex("Citrate cycle|TCA|Oxocarboxylic|Oxidative|Glycolysis|Fatty acid|Peroxisome", ignore_case=TRUE)) ~ "Metabolism / mitochondria",
+      TRUE ~ "Other"
+    ),
+    bucket = factor(bucket, levels = c(
+      "Endolysosomal / trafficking",
+      "Immune / inflammation",
+      "ECM / adhesion",
+      "Signaling / stress",
+      "Metabolism / mitochondria",
+      "Other"
+    ))
+  ) %>%
+  arrange(bucket, desc(abs(NES_mean)))
+
+ordered_levels <- bucketed$Description
+
+df1 <- df1 %>%
+  mutate(
+    Description = factor(Description, levels = rev(ordered_levels)),
+    Cluster = factor(Cluster, levels = c("DMD","EDMD","DNM2","POMPE"))  # adjust if needed
+  )
+
+K <- plot_gsea_dotplot(df1, color = "NES", showCategory = 10) +
+  viridis::scale_fill_viridis(option="G", alpha=1, begin=1, end=.3, direction=-1) +
+  xlab("") + scale_y_discrete(labels = ~ stringr::str_wrap(.x, width = 70))
+
+
+```
+
+
+
+```{r lysosome-and-phagosome-heatmaps}
+res_lyso_filtered <- make_pathway_heatmap(
+  df_gsea = df1,
+  datasets = datasets,
+  pathway = "Lysosome",
+  dataset_names = c("DMD", "EDMD", "POMPE", "DNM2"),
+  mode = "filtered",
+  fc_filter = log2(1.5),
+  min_presence_datasets = 3,
+  fc_limits = c(-2, 0, 2)
+)
+
+ComplexHeatmap::draw(res_lyso_filtered$heatmap)
+
+
+res_phago_filtered <- make_pathway_heatmap(
+  df_gsea = df1,
+  datasets = datasets,
+  pathway = "Phagosome",
+  dataset_names = c("DMD", "EDMD", "POMPE", "DNM2"),
+  mode = "filtered",
+  fc_filter = log2(1.5),
+  min_presence_datasets = 3,
+  fc_limits = c(-2, 0, 2)
+)
+
+ComplexHeatmap::draw(res_phago_filtered$heatmap)
+
+```
+
+
+# Transcription-factor activity
+
+```{r load-raw-results-for-tf-analysis}
+data_pompe <- readRDS("data/Pompe_paper.RDS")
+data_EDMD <- readRDS("data/EDMD_paper.RDS")
+data_DMD <- readRDS("data/DMD_paper.RDS")
+data_DNM2 <- readRDS("data/DNM2_paper.RDS")
+```
+
+
+```{r transcription-factor-activity}
+
+# Standardize DEG tables to gene, log2 fold-change, statistic, and adjusted p-value.
+# Dataset-specific source columns are declared explicitly below.
+standardize_deg <- function(df, gene_col, logfc_col,t, padj_col){
+  df  %>%
+    distinct(.data[[gene_col]], .keep_all = TRUE) %>%
+    transmute(
+      gene  = .data[[gene_col]],
+      logFC = .data[[logfc_col]],
+      t = .data[[t]],
+      p_adj = .data[[padj_col]]
+    ) %>% 
+    filter(!is.na(gene), !is.na(logFC), !is.na(p_adj))
+}
+
+# ULM is run on all genes with a valid statistic, matching the final TF analysis
+# in the original script. DEG thresholds are applied later only for TF-target plots.
+deg_DMD <- standardize_deg(data_DMD$dataset, gene_col = "Gene.symbol", logfc_col = "logFC", t = "t", padj_col = "adj.P.Val")
+deg_EDMD <- standardize_deg(data_EDMD$dataset, gene_col = "Symbol", logfc_col = "log2FoldChange", t = "stat", padj_col = "padj")
+deg_Pompe <- standardize_deg(data_pompe$dataset, gene_col = "Gene.symbol", logfc_col = "logFC", t = "t", padj_col = "adj.P.Val")
+deg_DNM2 <- standardize_deg(data_DNM2$dataset %>% ungroup, gene_col = "Human_symbol", logfc_col = "log2FoldChange", t = "stat", padj_col = "padj")
+
+
+
+set.seed(123)
+
+run_one_dataset <- function(deg, net){
+
+  contrast_acts <- run_ulm(mat=deg[, 't', drop=FALSE], net=net, .source='source', .target='target', .mor='mor', minsize = 5) %>% 
+    filter(p_value<0.05)
+  return(contrast_acts)
+}
+
+net <- decoupleR::get_collectri(organism="human", split_complexes=FALSE)
+
+
+res_DMD   <- run_one_dataset(deg_DMD %>% column_to_rownames(var="gene"),net) 
+res_EDMD   <- run_one_dataset(deg_EDMD %>% column_to_rownames(var="gene"),net)
+res_Pompe   <- run_one_dataset(deg_Pompe %>% column_to_rownames(var="gene"),net)
+res_DNM2   <- run_one_dataset(deg_DNM2 %>% column_to_rownames(var="gene"),net)
+
+acts_all <- bind_rows(
+  res_DMD  %>% mutate(dataset = "DMD"),
+  res_DNM2 %>% mutate(dataset = "DNM2"),
+  res_EDMD %>% mutate(dataset = "EDMD"),
+  res_Pompe %>% mutate(dataset = "Pompe")
+)
+
+acts_all <- acts_all %>%
+  mutate(
+    dataset = as.character(dataset),
+    direction = ifelse(score > 0, "up", "down")
+  )
+
+# Display TFs that are consistently activated or inhibited in all four diseases.
+tf_keep <- acts_all %>%
+  group_by(source) %>%
+  summarise(
+    n_up = sum(score > 0),
+    n_dn = sum(score < 0),
+    .groups = "drop"
+  ) %>%
+  filter((n_up >= 4 & n_dn == 0) | (n_dn >= 4 & n_up == 0)) %>%
+  pull(source)
+
+acts_plot <- acts_all %>% filter(source %in% tf_keep)
+
+p_top <- ggplot(acts_plot, aes(x = dataset, y = score, fill = dataset)) +
+  geom_col(width = 0.85) +
+  facet_grid(~ source, scales = "free") +
+  labs(x = NULL, y = "TF activity") +
+  theme_bw(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_blank(),
+    axis.text.x.top = element_text(face = "bold"),
+    axis.ticks.x = element_blank(),
+    strip.background = element_rect(fill = "grey95"),
+    panel.grid.major.x = element_blank(),
+    strip.text = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+```
+
+
+# TF target and protein-interaction network
+
+```{r tf-targets}
+selected_tfs <- c("JUN", "AP1")
+
+df <- net %>%
+      dplyr::filter(source %in% selected_tfs) %>%
+      dplyr::arrange(target) %>%
+      dplyr::mutate(ID = target, color = "3")
+
+degs_up <- extract_degs_no(list = datasets, 1.5)
+all_genes <- unique(unlist(degs_up))
+
+# Create a presence/absence matrix
+gene_presence_df <- map_dfc(degs_up, ~ all_genes %in% .x) %>%
+    mutate(Gene = all_genes) %>%
+    relocate(Gene) %>% as.data.frame
+
+gene_presence_df <- gene_presence_df %>%
+  mutate(N = rowSums(dplyr::select(., -Gene)))
+
+gene_presence_df <- gene_presence_df %>% filter(N >= 3)
+
+test <- gene_presence_df$Gene %>% str_split("_", simplify=T) %>% .[,1]
+
+
+deg_DMD_2 <- deg_DMD %>% as.data.frame %>% dplyr::filter(p_adj < 0.05, abs(logFC) > log2(1.5))
+deg_DMD_2 <- deg_DMD_2 %>% column_to_rownames(var="gene")
+
+deg_DMD_2 <- deg_DMD_2[rownames(deg_DMD_2) %in% test,]
+
+inter <- sort(dplyr::intersect(rownames(deg_DMD_2), df$target))
+
+df <- df %>% filter(target %in% inter)
+
+ df <- deg_DMD_2 %>% rownames_to_column(var="genes") %>% left_join(df,., by=c("target"="genes"))
+
+df <- df %>%
+      dplyr::mutate(color = dplyr::if_else(mor > 0 & t > 0, '1', color)) %>%
+      dplyr::mutate(color = dplyr::if_else(mor > 0 & t < 0, '2', color)) %>%
+      dplyr::mutate(color = dplyr::if_else(mor < 0 & t > 0, '2', color)) %>%
+      dplyr::mutate(color = dplyr::if_else(mor < 0 & t < 0, '1', color))
+
+colors <- rev(RColorBrewer::brewer.pal(n = 11, name = "RdBu")[c(2, 10)])
+
+p <- ggplot2::ggplot(data = df, 
+                     mapping = ggplot2::aes(x = logFC, 
+                                            y = -log10(p_adj), 
+                                            color = color,
+                                            size = abs(mor))) + 
+     ggplot2::geom_point(size = 2.5, 
+                         color = "black") + 
+     ggplot2::geom_point(size = 1.5) +
+     ggplot2::scale_colour_manual(values = c(colors[2], colors[1], "grey")) +
+     ggrepel::geom_label_repel(mapping = ggplot2::aes(label = ID,
+                                                      size = 1)) + 
+     ggplot2::theme_bw() +
+     ggplot2::theme(legend.position = "none") +
+     ggplot2::geom_vline(xintercept = 0, linetype = 'dotted') +
+     ggplot2::geom_hline(yintercept = 0, linetype = 'dotted')  + 
+  facet_wrap(source~.)
+
+p
+
+```
+
+
+```{r tf-string-network}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tibble)
+  library(STRINGdb)
+  library(igraph)
+  library(ggraph)
+  library(ggplot2)
+})
+
+# Build a regulatory network for AP1 and JUN, augmented with STRING interactions.
+
+tf_targets <- df %>% 
+  dplyr::select(source,ID,mor) %>% 
+  dplyr::mutate(mor = abs(mor)) %>% 
+  dplyr::rename(tf = source,target = ID, weight = mor) %>% 
+  dplyr::filter(target %in% degs_005_lfc15_3)
+
+edges_tf <- tf_targets %>%
+  transmute(
+    from = tf,
+    to = target,
+    edge_type = "TF",
+    weight = ifelse(is.na(weight), 1, weight),
+    directed = TRUE
+  )
+
+deg_symbols <- unique(c(tf_targets$target[tf_targets$target %in% degs_005_lfc15_3], degs_005_lfc15_4, res_phago_filtered$fc_matrix_clust %>% rownames, res_lyso_filtered$fc_matrix_clust %>% rownames))   # si tu veux élargir
+deg_symbols <- gsub("\\.[0-9]+$", "", deg_symbols)
+deg_symbols <- deg_symbols[deg_symbols != "" & !is.na(deg_symbols)]
+
+# STRING interaction edges between the selected DEGs.
+# This step downloads STRING data if it is not already cached locally.
+suppressPackageStartupMessages({
+  library(STRINGdb)
+  library(dplyr)
+})
+
+deg_symbols_clean <- unique(trimws(as.character(deg_symbols)))
+deg_symbols_clean <- deg_symbols_clean[deg_symbols_clean != "" & !is.na(deg_symbols_clean)]
+
+genes_df <- data.frame(gene = deg_symbols_clean, stringsAsFactors = FALSE)
+
+string_cutoff <- 700
+max_string_edges <- 700
+
+string_db <- STRINGdb$new(version = "12.0", species = 9606, score_threshold = 0)
+
+mapped_genes <- string_db$map(
+  genes_df,
+  "gene",
+  removeUnmappedRows = TRUE,
+  takeFirst = TRUE
+)
+
+ppi_raw <- string_db$get_interactions(mapped_genes$STRING_id)
+
+ids <- mapped_genes$STRING_id
+ppi_filt <- ppi_raw %>%
+  dplyr::filter(from %in% ids, to %in% ids) %>%
+  mutate(weight = combined_score) %>%
+  dplyr::filter(weight >= string_cutoff)
+
+id2gene <- setNames(mapped_genes$gene, mapped_genes$STRING_id)
+
+edges_string <- ppi_filt %>%
+  transmute(
+    from = id2gene[from],
+    to   = id2gene[to],
+    edge_type = "STRING",
+    weight = weight,
+    directed = FALSE
+  ) %>%
+  filter(!is.na(from), !is.na(to), from != to) %>%
+  rowwise() %>%
+  mutate(pair = paste(sort(c(from,to)), collapse="__")) %>%
+  ungroup() %>%
+  group_by(pair) %>%
+  summarise(across(c(from,to,edge_type,directed), first),
+            weight = max(weight), .groups="drop") %>%
+  dplyr::select(-pair) %>%
+  arrange(desc(weight)) %>%
+  slice_head(n = max_string_edges)
+
+# Combine regulatory and STRING interaction edges.
+edges_all <- bind_rows(edges_tf, edges_string)
+nodes <- tibble(node = unique(c(edges_all$from, edges_all$to))) %>%
+  mutate(
+    node_type = case_when(
+      node == "AP1" ~ "TF_AP1",
+      node == "JUN" ~ "TF_JUN",
+      node %in% tf_targets$target ~ "TF_target",
+      TRUE ~ "DEG"
+    )
+  )
+
+# Create graph
+g <- graph_from_data_frame(edges_all, directed = TRUE, vertices = nodes)
+
+# Define colors
+node_cols <- c(
+  TF_AP1 = "#E31A1C",    # rouge
+  TF_JUN = "#6A3D9A",    # violet
+  TF_target = "#FF7F0E", # orange
+  DEG = "#1F77B4"        # bleu
+)
+edge_cols <- c(TF = "#111111", STRING = "#9E9E9E")
+
+# Set node sizes
+V(g)$size <- ifelse(V(g)$node_type %in% c("TF_AP1","TF_JUN"), 7,
+                    ifelse(V(g)$node_type == "TF_target", 5, 3.5))
+
+# Set edge widths
+E(g)$ew <- ifelse(E(g)$edge_type == "TF",
+                  1.4,
+                  0.4 + 1.2 * (E(g)$weight / max(E(g)$weight, na.rm=TRUE)))
+
+
+metrics <- tibble(
+  gene = V(g)$name,
+  degree = degree(g, mode = "all"),
+  betweenness = betweenness(g)
+) %>% filter(!gene %in% c("JUN","AP1"))
+
+top_degree <- metrics %>%
+  arrange(desc(degree)) %>%
+  dplyr::slice(1:10) %>%
+  mutate(metric = "Degree centrality",
+         value = degree)
+
+top_btw <- metrics %>%
+  arrange(desc(betweenness)) %>%
+  dplyr::slice(1:10) %>%
+  mutate(metric = "Betweenness centrality",
+         value = betweenness)
+
+plot_data <- bind_rows(top_degree, top_btw)
+
+plot_data <- plot_data %>%
+    mutate(gene = reorder_within(gene, value, metric))
+
+p <- ggplot(plot_data,
+       aes(x = gene, y = value, fill = metric)) +
+    geom_col(width = 0.7) +
+    coord_flip() +
+    facet_wrap(~metric, scales = "free") +
+    scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) +
+    scale_x_reordered() +
+    scale_fill_manual(values = c(
+        "Degree centrality" = "#5A67D8",
+        "Betweenness centrality" = "#38A169"
+    )) +
+    labs(
+        x = NULL,
+        y = NULL
+    ) +
+    theme_bw(base_size = 14) +
+    theme(
+        legend.position = "none",
+        axis.text.y = element_text(face = "bold", color = "black"),
+        axis.text.x = element_text(face = "bold", color = "black"),
+        strip.text = element_text(face = "bold"),
+        panel.grid.major.y = element_blank()
+    )
+
+# Compute a deterministic graph layout.
+set.seed(1)
+layout <- create_layout(g, layout = "kk")
+
+ggraph(layout) +
+  # All edges: faint, no arrows.
+  geom_edge_link(aes(edge_width = ew, edge_color = edge_type),
+                 alpha = 0.35, lineend = "round") +
+  # TF edges only: emphasized with arrows.
+  geom_edge_link(aes(edge_width = ew, edge_color = edge_type,
+                     filter = edge_type == "TF"),
+                 arrow = arrow(length = unit(2.5, "mm"), type = "closed"),
+                 end_cap = circle(2.5, "mm"),
+                 alpha = 0.9, lineend = "round") +
+  geom_node_point(aes(color = node_type, size = size)) +
+  geom_node_text(aes(label = name), repel = TRUE, size = 3) +
+  scale_color_manual(values = node_cols) +
+  scale_edge_color_manual(values = edge_cols) +
+  scale_edge_width(range = c(0.2, 2.0), guide = "none") +
+  scale_size_identity() +  # Use actual size values from nodes
+  theme_void() +
+  ggtitle("AP1 & JUN directed regulatory module with STRING interactions among DEGs") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# KEGG pathway overlays
+
+# Average log2 fold changes across diseases for KEGG pathway overlays.
+# pathview may download KEGG pathway data if it is not already cached locally.
+mean_genes <- ranked_log2_fold_changes %>%
+  imap(~ tibble(gene = names(.x), value = .x, dataset = .y)) %>%
+  bind_rows() %>%
+  group_by(gene) %>%
+  summarise(mean_log2FC = mean(value, na.rm = TRUE)) %>%
+  arrange(desc(mean_log2FC))
+
+genes <- mean_genes$mean_log2FC
+names(genes) <- mean_genes$gene
+
+
+
+library("pathview")
+hsa04142 <- pathview(gene.data  = genes,
+                     pathway.id = "hsa04142",
+                     species    = "hsa", low="blue",high="red",
+                     kegg.dir = "figures")
+library("pathview")
+hsa04145 <- pathview(gene.data  = genes,
+                     pathway.id = "hsa04145",
+                     species    = "hsa", low="blue",high="red",
+                     kegg.dir = "figures")
+
+pv <- pathview(
+  gene.data  = genes,
+  pathway.id = "hsa04145",
+  species    = "hsa",
+  low  = "blue",
+  high = "red",
+  kegg.native = FALSE,
+  kegg.dir = "figures"
+)
+library(Rgraphviz)
+
+svg("figures/pathway.svg", width = 12, height = 10)
+Rgraphviz::renderGraph(pv$graph)
+dev.off()
+
+
+
+
+```
+
+
