@@ -3,7 +3,10 @@
 #   Differential expression analysis with DESeq2
 library(DESeq2)
 
-# load counts table from GEO
+# Set to TRUE only when intentionally regenerating data/EDMD_paper.RDS.
+write_processed_data <- FALSE
+
+# Load counts table and annotations from GEO.
 urld <- "https://www.ncbi.nlm.nih.gov/geo/download/?format=file&type=rnaseq_counts"
 path <- paste(urld, "acc=GSE204804", "file=GSE204804_raw_counts_GRCh38.p13_NCBI.tsv.gz", sep="&");
 tbl <- as.matrix(data.table::fread(path, header=T, colClasses="integer"), rownames="GeneID")
@@ -99,5 +102,7 @@ data_sym_agg <- data_sym %>%
 EDMD <- list(dataset = data, expr = data_sym_agg, group = gs)
 
 
-saveRDS(EDMD, file = "papier/data/EDMD_paper.RDS")
+if (write_processed_data) {
+  saveRDS(EDMD, file = "data/EDMD_paper.RDS")
+}
 

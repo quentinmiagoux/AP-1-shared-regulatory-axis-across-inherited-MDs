@@ -10,7 +10,10 @@ library(GEOquery)
 library(limma)
 library(umap)
 
-# load series and platform data from GEO
+# Set to TRUE only when intentionally regenerating data/DMD_paper.RDS.
+write_processed_data <- FALSE
+
+# Load series and platform data from GEO.
 
 gset <- getGEO("GSE38417", GSEMatrix =TRUE, AnnotGPL=TRUE)
 if (length(gset) > 1) idx <- grep("GPL570", attr(gset, "names")) else idx <- 1
@@ -76,12 +79,8 @@ gsea_all_genes_h <- data$logFC
 names(gsea_all_genes_h) <- data$entrezgene_id
 gsea_all_genes_h <- gsea_all_genes_h[!is.na(gsea_all_genes_h)]
 
-source("Enrichment.R")
-
-DMD <- enrich_it_baby(gsea_full =  gsea_all_genes_h, 
-                       deg_down = data_h_degs_down$entrezgene_id, 
-                       deg_up = data_h_degs_up$entrezgene_id, 
-                       universe = data$entrezgene_id)
+# Optional enrichment analysis omitted here: it requires Enrichment.R, which is
+# not part of this repository. It does not affect the exported DMD object below.
 
 
 
@@ -108,4 +107,6 @@ expr_clean <- expr_df %>%
 
 DMD <- list(dataset = data, expr = expr_clean, group = gs)
 
-saveRDS(DMD, file = "papier/data/DMD_paper.RDS")
+if (write_processed_data) {
+  saveRDS(DMD, file = "data/DMD_paper.RDS")
+}

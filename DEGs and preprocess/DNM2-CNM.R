@@ -11,13 +11,20 @@ library(org.Hs.eg.db)
 library(openxlsx)
 set.seed(123)
 
+# Set to TRUE only when intentionally regenerating data/DNM2_paper.RDS.
+write_processed_data <- FALSE
+
 GSE160078 <- getGEO("GSE160078",GSEMatrix=TRUE)
 
 info <- GSE160078$GSE160078_series_matrix.txt.gz
 
 info_f <- data.frame(condition = info$`treatment:ch1`, sex = info$`Sex:ch1`, tissue = info$`tissue:ch1`, GT = info$`genotype:ch1`) %>% mutate(condition_f = paste0(condition,"_",GT))
 
-data <- read.xlsx("data/GSE160078_Raw_gene_counts_matrix_Cohort_DNM2_Updated-07-01-2024.xlsx")
+raw_counts_path <- "data/GSE160078_Raw_gene_counts_matrix_Cohort_DNM2_Updated-07-01-2024.xlsx"
+if (!file.exists(raw_counts_path)) {
+  stop("Missing raw count matrix: ", raw_counts_path)
+}
+data <- read.xlsx(raw_counts_path)
 
 
 info_f <- info_f %>% filter(condition_f %in% c("ASO Control_Dnm2SL/+", "ASO Control_WT")) %>% dplyr::arrange(desc(condition_f))
@@ -126,6 +133,8 @@ data_sym_agg <- data_sym_tmp %>%
 
 groups <- data_sym_agg %>% colnames %>% str_split('\\.', simplify = T) %>% .[,1]
 
-DMN2 <- list(dataset = data_h, expr = data_sym_agg, group = groups)
+DNM2 <- list(dataset = data_h, expr = data_sym_agg, group = groups)
 
-saveRDS(DMN2, file = "papier/data/DNM2_paper.RDS")
+if (write_processed_data) {
+  saveRDS(DNM2, file = "data/DNM2_paper.RDS")
+}

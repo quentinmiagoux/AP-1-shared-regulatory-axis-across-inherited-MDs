@@ -6,7 +6,10 @@ library(limma)
 library(dplyr)
 library(biomaRt)
 
-# load series and platform data from GEO
+# Set to TRUE only when intentionally regenerating data/Pompe_paper.RDS.
+write_processed_data <- FALSE
+
+# Load series and platform data from GEO.
 
 gset <- getGEO("GSE38680", GSEMatrix =TRUE, AnnotGPL=TRUE)
 if (length(gset) > 1) idx <- grep("GPL570", attr(gset, "names")) else idx <- 1
@@ -113,5 +116,7 @@ expr_clean <- expr_df %>%
 
 Pompe <- list(dataset = final, expr = expr_clean, group = gs)
 
-# saveRDS(Pompe, file = "papier/data/Pompe_paper.RDS")
+if (write_processed_data) {
+  saveRDS(Pompe, file = "data/Pompe_paper.RDS")
+}
 
