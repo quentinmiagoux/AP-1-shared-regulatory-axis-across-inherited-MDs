@@ -2,6 +2,14 @@
 
 This repository contains the analysis code supporting *Integrative transcriptomic and network analysis identifies AP-1 as a shared regulatory axis across inherited muscle disorders*.
 
+**Authors:** Quentin Miagoux<sup>1,2</sup>, Hassan Hayat<sup>1</sup>, Matthieu Lejars<sup>1,2</sup>, Beatrice Labela<sup>3</sup>, Teresinha Evangelista<sup>3</sup>, and Xavier Nissan<sup>1,2</sup>.
+
+<sup>1</sup> Universite Paris-Saclay, Universite d'Evry, Inserm, IStem, UMR861, Corbeil-Essonnes, France.  
+<sup>2</sup> IStem, CECS, Corbeil-Essonnes, France.  
+<sup>3</sup> Neuromuscular Morphology Unit, Myology Institute, Groupe Hospitalier Universitaire Pitie-Salpetriere, Paris, France.
+
+**Corresponding authors:** Quentin Miagoux (qmiagoux@istem.fr) and Xavier Nissan (xnissan@istem.fr).
+
 The study integrates publicly available transcriptomic data from Duchenne muscular dystrophy (DMD), Pompe disease, Emery-Dreifuss muscular dystrophy (EDMD), and DNM2-related centronuclear myopathy (CNM). It identifies convergent expression and pathway-level signatures, infers transcription-factor activity, and reconstructs an AP-1/JUN-centred regulatory network.
 
 ## Repository contents
@@ -10,16 +18,6 @@ The study integrates publicly available transcriptomic data from Duchenne muscul
 - `function.R` - helper functions used by the report.
 - `data/` - processed inputs used directly by the main analysis.
 - `DEGs and preprocess/` - disease-specific preprocessing scripts for the four source datasets.
-
-## Running the main analysis
-
-Open `integrative_transcriptomic_network_analysis.Rproj` in RStudio, install the packages loaded at the start of the R Markdown file, then render:
-
-```r
-rmarkdown::render("integrative_transcriptomic_network_analysis.Rmd")
-```
-
-The report reads the processed `.RDS` files in `data/` and writes generated figures to `figures/`.
 
 ## Reproducing the processed inputs
 
