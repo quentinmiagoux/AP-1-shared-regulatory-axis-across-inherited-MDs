@@ -23,7 +23,7 @@ The study integrates publicly available transcriptomic data from Duchenne muscul
 
 The preprocessing scripts correspond to DMD (GSE38417), EDMD (GSE204804), DNM2-related CNM (GSE160078), and Pompe disease (GSE38680). To prevent accidental replacement of the included processed inputs, each script uses `write_processed_data <- FALSE` by default. Set it to `TRUE` only when you intend to regenerate the corresponding `.RDS` file.
 
-The DNM2 preprocessing script additionally requires the raw count matrix `data/GSE160078_Raw_gene_counts_matrix_Cohort_DNM2_Updated-07-01-2024.xlsx`, which is not included in this repository.
+The raw count matrix required by the DNM2 preprocessing script is included in the repository at `data/GSE160078_Raw_gene_counts_matrix_Cohort_DNM2.txt`.
 
 ## Notes
 
