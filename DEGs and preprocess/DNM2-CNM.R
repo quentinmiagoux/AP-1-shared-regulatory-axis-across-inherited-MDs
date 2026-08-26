@@ -8,7 +8,6 @@ library(ReactomePA)
 library(Orthology.eg.db)
 library(org.Mm.eg.db)
 library(org.Hs.eg.db)
-library(openxlsx)
 set.seed(123)
 
 # Set to TRUE only when intentionally regenerating data/DNM2_paper.RDS.
@@ -20,15 +19,15 @@ info <- GSE160078$GSE160078_series_matrix.txt.gz
 
 info_f <- data.frame(condition = info$`treatment:ch1`, sex = info$`Sex:ch1`, tissue = info$`tissue:ch1`, GT = info$`genotype:ch1`) %>% mutate(condition_f = paste0(condition,"_",GT))
 
-raw_counts_path <- "data/GSE160078_Raw_gene_counts_matrix_Cohort_DNM2_Updated-07-01-2024.xlsx"
+raw_counts_path <- "data/GSE160078_Raw_gene_counts_matrix_Cohort_DNM2.txt"
 if (!file.exists(raw_counts_path)) {
   stop("Missing raw count matrix: ", raw_counts_path)
 }
-data <- read.xlsx(raw_counts_path)
+data <- read.delim(raw_counts_path, check.names = TRUE)
 
 
 info_f <- info_f %>% filter(condition_f %in% c("ASO Control_Dnm2SL/+", "ASO Control_WT")) %>% dplyr::arrange(desc(condition_f))
-data2 <- dplyr::select(data, WT.ASO.Control.1:WT.ASO.Control.4,,`Dnm2SL/+.ASO.Control.1`:`Dnm2SL/+.ASO.Control.6`)
+data2 <- dplyr::select(data, WT.ASO.Control.1:WT.ASO.Control.4, `Dnm2SL/+.ASO.Control.1`:`Dnm2SL/+.ASO.Control.6`)
 rownames(data2) <- data$Ensembl.Gene.ID
 
 
@@ -125,7 +124,7 @@ data_sym_tmp  <- data_sym %>%
   dplyr::select(!c(ensembl_gene_id,mgi_symbol,entrezgene_id)) %>% 
   dplyr::select(Human_symbol, everything())
 
-# Agrégation par symbole (moyenne)
+# Agregation par symbole (moyenne)
 data_sym_agg <- data_sym_tmp %>%
   group_by(Human_symbol) %>%
   summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>%
